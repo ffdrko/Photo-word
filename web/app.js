@@ -1,3 +1,4 @@
+// this is app js
 /* SnapNote web client */
 const $ = (id) => document.getElementById(id);
 
