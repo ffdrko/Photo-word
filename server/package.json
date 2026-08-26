@@ -1,0 +1,17 @@
+{
+  "name": "snapnote-server",
+  "version": "1.0.0",
+  "description": "Photo-to-Word OCR note app backend",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "docx": "^9.0.2",
+    "express": "^4.21.0",
+    "multer": "^2.2.0",
+    "tesseract.js": "^5.1.1"
+  }
+}

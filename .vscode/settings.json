@@ -1,0 +1,10 @@
+{
+  "files.watcherExclude": {
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true
+  },
+  "typescript.tsdk": false,
+  "js/ts.implicitProjectConfig.checkJs": false
+}

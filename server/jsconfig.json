@@ -1,0 +1,4 @@
+{
+  // Tell VS Code to only type-check our own code, not dependencies
+  "exclude": ["node_modules", "**/node_modules/**"]
+}

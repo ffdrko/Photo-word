@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "SnapNote",
+    "slug": "snapnote",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#4f46e5"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "SnapNote needs photo access to convert your note photos into Word documents.",
+        "NSCameraUsageDescription": "SnapNote uses the camera to photograph your notes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#4f46e5"
+      },
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE"]
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        { "cameraPermission": "Allow SnapNote to take photos of your notes." }
+      ]
+    ]
+  }
+}

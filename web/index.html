@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SnapNote — Photo to Word</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>📸 SnapNote</h1>
+    <p>Photo → OCR → Rich-formatted Word document</p>
+    <button id="themeToggle" class="icon-btn" title="Toggle dark mode">🌙</button>
+  </header>
+
+  <main>
+    <!-- Step 1: Image input -->
+    <section id="step-upload" class="card">
+      <h2>1. Add photos <span class="count-badge" id="imageCount"></span></h2>
+      <div id="dropZone" class="drop-zone">
+        <p>Drag & drop images here (multiple allowed), or</p>
+        <div class="btn-row">
+          <label class="btn primary">
+            📁 Choose files
+            <input type="file" id="fileInput" accept="image/*" multiple hidden />
+          </label>
+          <label class="btn">
+            📷 Take photo
+            <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden />
+          </label>
+        </div>
+      </div>
+      <div id="thumbsWrap" class="thumbs-wrap hidden"></div>
+      <div class="btn-row">
+        <button id="runOcrBtn" class="btn primary hidden">🔍 Extract text from all (OCR)</button>
+      </div>
+      <div id="ocrStatus" class="status hidden"></div>
+    </section>
+
+    <!-- Step 2: Raw text -->
+    <section id="step-text" class="card hidden">
+      <h2>2. Review extracted text</h2>
+      <p class="hint">Fix any OCR mistakes here before formatting.</p>
+      <textarea id="rawText" rows="10" placeholder="Extracted text will appear here..."></textarea>
+      <div class="btn-row">
+        <button id="formatBtn" class="btn primary">✨ Format text</button>
+      </div>
+    </section>
+
+    <!-- Step 3: Formatted preview -->
+    <section id="step-preview" class="card hidden">
+      <h2>3. Preview & export</h2>
+      <label class="field-label">Document title
+        <input type="text" id="docTitle" value="My Notes" />
+      </label>
+      <div id="blocksPreview" class="blocks-preview"></div>
+      <div class="btn-row">
+        <button id="exportBtn" class="btn primary">⬇️ Download .docx</button>
+        <button id="startOverBtn" class="btn">Start over</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>SnapNote · local OCR pipeline · no data leaves your machine except to localhost</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
