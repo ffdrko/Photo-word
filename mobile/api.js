@@ -1,67 +1,80 @@
-// SnapNote API client — points to your computer's SnapNote server.
-// Replace with your PC's local IP (find it with `ipconfig`), e.g. http://192.168.1.5:3000
+// SnapNote API client.
+//
+// The server is only needed for formatting and .docx export; OCR runs on the
+// device. Point API_URL at whichever machine runs `npm start` in ../server.
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-// Android emulator uses 10.0.2.2 to reach host machine; real devices need the LAN IP.
-export const API_URL = 'http://192.168.0.199:3000'; // PC's Wi-Fi IP — update if your network changes
+// Resolution order:
+//   1. extra.apiUrl in app.json (or EXPO_PUBLIC_API_URL at build time)
+//   2. the host serving Metro, which is usually the same dev machine
+//   3. the Android emulator's alias for the host, or localhost on iOS
+function resolveApiUrl() {
+  const configured =
+    Constants.expoConfig?.extra?.apiUrl || process.env.EXPO_PUBLIC_API_URL;
+  if (configured) return configured.replace(/\/$/, '');
 
-/**
- * Upload an image and OCR it.
- * @param {string} uri - local file uri from image picker
- * @returns {Promise<{rawText: string, confidence: number|null}>}
- */
-export async function ocrImage(uri) {
-  const formData = new FormData();
-  formData.append('image', {
-    uri,
-    name: 'photo.jpg',
-    type: 'image/jpeg',
-  });
+  const hostUri = Constants.expoConfig?.hostUri || Constants.expoGoConfig?.debuggerHost;
+  const host = hostUri && hostUri.split(':')[0];
+  if (host) return `http://${host}:3000`;
 
-  const res = await fetch(`${API_URL}/api/ocr`, {
-    method: 'POST',
-    body: formData,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'OCR failed');
-  return data;
+  return Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+}
+
+export let API_URL = resolveApiUrl();
+
+/** Override at runtime from a settings screen. */
+export function setApiUrl(url) {
+  API_URL = String(url).replace(/\/$/, '');
+  return API_URL;
+}
+
+async function readError(res, fallback) {
+  const body = await res.json().catch(() => ({}));
+  return new Error(body.error || fallback);
 }
 
 /**
- * Send raw text for heuristic formatting.
- * @param {string} rawText
- * @returns {Promise<Array>} blocks
+ * Server-side OCR. Only used when on-device recognition is unavailable, or for
+ * scripts ML Kit doesn't support (it covers Latin, Chinese, Devanagari,
+ * Japanese and Korean; Tesseract covers many more).
  */
-export async function formatText(rawText) {
+export async function ocrImage(uri, lang) {
+  const formData = new FormData();
+  formData.append('image', { uri, name: 'photo.jpg', type: 'image/jpeg' });
+  if (lang) formData.append('lang', lang);
+
+  const res = await fetch(`${API_URL}/api/ocr`, { method: 'POST', body: formData });
+  if (!res.ok) throw await readError(res, 'OCR failed');
+  return res.json();
+}
+
+/**
+ * Turn OCR output into structured blocks.
+ * Pass `lines` when geometry is available; pass `rawText` after the user has
+ * edited the text, since editing invalidates the line boxes.
+ */
+export async function formatBlocks({ lines, rawText }) {
   const res = await fetch(`${API_URL}/api/format`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rawText }),
+    body: JSON.stringify(lines && lines.length ? { lines } : { rawText }),
   });
+  if (!res.ok) throw await readError(res, 'Formatting failed');
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Formatting failed');
   return data.blocks;
 }
 
-/**
- * Export blocks as .docx; returns the downloaded file URI.
- * @param {Array} blocks
- * @param {string} title
- * @param {string} fileUri - destination file uri in app cache
- * @returns {Promise<string>} fileUri of written docx
- */
+/** Export blocks as .docx, writing the file to `fileUri`. Returns that uri. */
 export async function exportDocx(blocks, title, fileUri) {
   const res = await fetch(`${API_URL}/api/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ blocks, title }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Export failed');
-  }
+  if (!res.ok) throw await readError(res, 'Export failed');
+
   const blob = await res.blob();
-  // Write via FileSystem passed in to avoid circular import
   const { writeAsStringAsync, EncodingType } = require('expo-file-system');
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();

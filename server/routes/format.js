@@ -1,15 +1,21 @@
 const express = require('express');
-const { formatText } = require('../services/formatService');
+const { formatLayout, formatText } = require('../services/formatService');
 
 const router = express.Router();
 
-// POST /api/format  { rawText: "..." }
+// POST /api/format
+//   { lines: [...] }    preferred - geometry from the OCR engine
+//   { rawText: "..." }  fallback  - hand-edited text, geometry lost
 router.post('/', (req, res) => {
-  const { rawText } = req.body;
-  if (!rawText || typeof rawText !== 'string') {
-    return res.status(400).json({ error: 'rawText (string) is required' });
+  const { lines, rawText, pageWidth, pageHeight } = req.body || {};
+
+  if (Array.isArray(lines) && lines.length) {
+    return res.json({ blocks: formatLayout({ lines, pageWidth, pageHeight }), source: 'layout' });
   }
-  res.json({ blocks: formatText(rawText) });
+  if (typeof rawText === 'string' && rawText.trim()) {
+    return res.json({ blocks: formatText(rawText), source: 'text' });
+  }
+  res.status(400).json({ error: 'Provide either lines (array) or rawText (string)' });
 });
 
 module.exports = router;

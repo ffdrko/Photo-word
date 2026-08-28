@@ -14,14 +14,34 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { ocrImage, formatText, exportDocx, API_URL } from './api';
-import { ocrOnDevice } from './onDeviceOcr';
+import { ocrImage, formatBlocks, exportDocx, API_URL } from './api';
+import { ocrOnDevice, isUnavailableError } from './onDeviceOcr';
+
+// Recognition accuracy plateaus well below full sensor resolution, but time
+// scales with pixel count, so shrink before doing any work.
+const MAX_EDGE = 2000;
+
+async function downscale(uri) {
+  try {
+    const { uri: out } = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: MAX_EDGE } }],
+      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return out;
+  } catch {
+    return uri; // not worth failing the whole run over
+  }
+}
 
 export default function App() {
   const [images, setImages] = useState([]); // [{ uri }]
   const [rawText, setRawText] = useState('');
+  const [layoutLines, setLayoutLines] = useState([]);
+  const [textEdited, setTextEdited] = useState(false);
   const [blocks, setBlocks] = useState([]);
   const [title, setTitle] = useState('My Notes');
   const [busy, setBusy] = useState(false);
@@ -44,7 +64,8 @@ export default function App() {
           allowsMultipleSelection: true,
         });
     if (result.canceled) return;
-    setImages((prev) => [...prev, ...result.assets.map((a) => ({ uri: a.uri }))]);
+    const resized = await Promise.all(result.assets.map((a) => downscale(a.uri)));
+    setImages((prev) => [...prev, ...resized.map((uri) => ({ uri }))]);
   }
 
   function removeImage(index) {
@@ -54,12 +75,12 @@ export default function App() {
   // ---- OCR all images sequentially (on-device first, server fallback) ----
   async function ocrSingle(uri) {
     try {
-      const result = await ocrOnDevice(uri);
-      return { ...result, engine: 'on-device' };
+      return await ocrOnDevice(uri);
     } catch (e) {
-      // On-device OCR unavailable (e.g. Expo Go) — fall back to server Tesseract
-      const result = await ocrImage(uri);
-      return { ...result, engine: 'server' };
+      // Only fall back when the native module is genuinely missing. Swallowing
+      // every error here would silently downgrade quality to hide real bugs.
+      if (!isUnavailableError(e)) throw e;
+      return ocrImage(uri);
     }
   }
 
@@ -67,22 +88,33 @@ export default function App() {
     if (!images.length) return;
     setBusy(true);
     setRawText('');
+    setLayoutLines([]);
+    setTextEdited(false);
     const confidences = [];
-    let enginesUsed = new Set();
+    const enginesUsed = new Set();
+    const allLines = [];
+    const texts = [];
     try {
       for (let i = 0; i < images.length; i++) {
         setStatus(`OCR: image ${i + 1} of ${images.length}…`);
-        const { rawText: text, confidence, engine } = await ocrSingle(images[i].uri);
-        enginesUsed.add(engine);
-        if (typeof confidence === 'number') confidences.push(confidence);
-        setRawText((prev) => (prev ? prev + '\n\n' : '') + text);
+        const page = await ocrSingle(images[i].uri);
+        enginesUsed.add(page.engine);
+        if (typeof page.confidence === 'number') confidences.push(page.confidence);
+        texts.push(page.rawText);
+        // Namespace block ids per page so lines from different photos are never
+        // merged into one paragraph.
+        for (const line of page.lines || []) {
+          allLines.push({ ...line, block: `${i}:${line.block}` });
+        }
       }
+      setRawText(texts.join('\n\n'));
+      setLayoutLines(allLines);
       const avg = confidences.length
         ? Math.round((confidences.reduce((a, b) => a + b, 0) / confidences.length) * 100)
         : null;
-      const engineLabel = enginesUsed.has('on-device')
-        ? 'on-device (Vision/ML Kit)'
-        : 'server (Tesseract)';
+      const engineLabel = [...enginesUsed]
+        .map((e) => (e === 'on-device' ? 'on-device (ML Kit)' : 'server (Tesseract)'))
+        .join(' + ');
       setStatus(`Done via ${engineLabel}${avg !== null ? ` — confidence ${avg}%` : ''}`);
     } catch (e) {
       setStatus('');
@@ -97,9 +129,12 @@ export default function App() {
     if (!rawText.trim()) return;
     setBusy(true);
     try {
-      const result = await formatText(rawText);
+      // Editing the text invalidates the line boxes, so only send geometry
+      // while the recognized text is untouched.
+      const useLayout = !textEdited && layoutLines.length > 0;
+      const result = await formatBlocks(useLayout ? { lines: layoutLines } : { rawText });
       setBlocks(result);
-      setStatus(`Formatted into ${result.length} blocks`);
+      setStatus(`Formatted into ${result.length} blocks${useLayout ? ' using layout' : ''}`);
     } catch (e) {
       Alert.alert('Formatting failed', e.message);
     } finally {
@@ -134,18 +169,28 @@ export default function App() {
   function reset() {
     setImages([]);
     setRawText('');
+    setLayoutLines([]);
+    setTextEdited(false);
     setBlocks([]);
     setStatus('');
   }
 
   // ---- Render helpers ----
+  // Numbered items count from the start of their own run, not from the block
+  // index, so a list further down the document still begins at 1.
+  const listNumbers = blocks.reduce((acc, b, i) => {
+    acc[i] = b.type === 'numbered' ? (acc[i - 1] || 0) + 1 : 0;
+    return acc;
+  }, {});
+
   function renderBlock(b, i) {
     if (b.type === 'heading1') return <Text key={i} style={s.h1}>{b.text}</Text>;
     if (b.type === 'heading2') return <Text key={i} style={s.h2}>{b.text}</Text>;
     if (b.type === 'heading3') return <Text key={i} style={s.h3}>{b.text}</Text>;
     const runsText = (b.runs || []).map((r) => r.text).join('');
     if (b.type === 'bullet') return <Text key={i} style={s.bullet}>•  {runsText}</Text>;
-    if (b.type === 'numbered') return <Text key={i} style={s.bullet}>{i + 1}.  {runsText}</Text>;
+    if (b.type === 'numbered')
+      return <Text key={i} style={s.bullet}>{listNumbers[i]}.  {runsText}</Text>;
     return (
       <Text key={i} style={s.p}>
         {(b.runs || []).map((r, j) => (
@@ -194,7 +239,7 @@ export default function App() {
               style={s.textarea}
               multiline
               value={rawText}
-              onChangeText={setRawText}
+              onChangeText={(t) => { setRawText(t); setTextEdited(true); }}
               placeholder="Extracted text appears here…"
             />
             <View style={s.btnWrap}>

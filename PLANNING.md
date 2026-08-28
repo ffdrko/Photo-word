@@ -46,11 +46,11 @@ A note-taking app where the user clicks a picture of written content (notebook, 
 ## 4. API Design
 
 ### `POST /api/ocr`
-- **Input:** image file (`FormData`, field: `image`)
-- **Output:** `{ "rawText": "...", "confidence": 0.92 }`
+- **Input:** image file (`FormData`, field: `image`), optional `lang`
+- **Output:** `{ "rawText": "...", "confidence": 0.92, "lines": [...], "engine": "server" }`
 
 ### `POST /api/format`
-- **Input:** `{ "rawText": "..." }`
+- **Input:** `{ "lines": [...] }` (preferred) or `{ "rawText": "..." }` (after editing)
 - **Output:** structured blocks:
 ```json
 {
@@ -106,34 +106,38 @@ project/
     └── app.js
 ```
 
-*(React Native app added later as `mobile/` folder or separate repo.)*
+The React Native app lives in `mobile/`. It uses ML Kit on-device rather than
+calling `/api/ocr`, so the server is only involved in formatting and export.
 
 ---
 
 ## 7. Development Phases
 
 ### Phase 1 — Backend Core ✅ target: day 1–2
-- [ ] Scaffold Node.js project, install deps
-- [ ] `/api/ocr` endpoint working with test images
-- [ ] `/api/format` heuristic engine + unit tests
-- [ ] `/api/export` producing valid `.docx`
+- [x] Scaffold Node.js project, install deps
+- [x] `/api/ocr` endpoint working with test images
+- [x] `/api/format` heuristic engine + unit tests
+- [x] `/api/export` producing valid `.docx`
+- [x] Persistent Tesseract worker pool; local traineddata
 
 ### Phase 2 — Web Frontend ✅ target: day 3–4
-- [ ] Image upload (file picker + camera capture via `<input capture>`)
-- [ ] Raw text preview with editable textarea
-- [ ] Formatted preview (rendered blocks)
-- [ ] Export button → downloads `.docx`
+- [x] Image upload (file picker + camera capture via `<input capture>`)
+- [x] Raw text preview with editable textarea
+- [x] Formatted preview (rendered blocks)
+- [x] Export button → downloads `.docx`
 
 ### Phase 3 — Polish ✅ target: day 5
-- [ ] Multi-image support (append into one document)
-- [ ] Error handling & loading states
-- [ ] Basic styling / dark mode
+- [x] Multi-image support (append into one document)
+- [x] Error handling & loading states
+- [x] Basic styling / dark mode
+- [x] Client-side downscaling before upload
+- [ ] Editable structured preview (retype a block, not just the text)
 
 ### Phase 4 — React Native App ✅ target: week 2
-- [ ] Init RN project, image picker integration
-- [ ] Camera capture → POST to API
-- [ ] Preview/edit screen → export/share `.docx`
-- [ ] Handle Android/iOS file sharing
+- [x] Init RN project, image picker integration
+- [x] Camera capture → on-device OCR
+- [x] Preview/edit screen → export/share `.docx`
+- [x] Handle Android/iOS file sharing
 
 ### Phase 5 — Future Enhancements 💡
 - [ ] Handwriting-specific OCR model (e.g., Google Cloud Vision / TrOCR)

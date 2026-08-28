@@ -1,4 +1,3 @@
-// this is app js
 /* SnapNote web client */
 const $ = (id) => document.getElementById(id);
 
@@ -23,6 +22,29 @@ const els = {
 
 let images = []; // [{ file, url }]
 let currentBlocks = [];
+let layoutLines = [];
+let textEdited = false;
+
+// Accuracy plateaus well below full camera resolution but OCR time scales with
+// pixel count, so shrink before uploading.
+const MAX_EDGE = 2000;
+
+async function downscale(file) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1) return file;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+    bitmap.close();
+    return blob ? new File([blob], file.name, { type: 'image/jpeg' }) : file;
+  } catch {
+    return file; // not worth failing the run over
+  }
+}
 
 // ---------- Theme ----------
 const savedTheme = localStorage.getItem('snapnote-theme');
@@ -101,6 +123,7 @@ els.cameraInput.addEventListener('change', (e) => { addImages(e.target.files); e
   })
 );
 els.dropZone.addEventListener('drop', (e) => addImages(e.dataTransfer.files));
+els.rawText.addEventListener('input', () => { textEdited = true; });
 
 // ---------- OCR (sequential over all images) ----------
 function setStatus(msg, isError = false) {
@@ -113,19 +136,34 @@ els.runOcrBtn.addEventListener('click', async () => {
   if (!images.length) return;
   els.runOcrBtn.disabled = true;
   els.rawText.value = '';
-  const confidences = [];
+  layoutLines = [];
+  textEdited = false;
   try {
-    for (let i = 0; i < images.length; i++) {
-      setStatus(`⏳ Running OCR on image ${i + 1} of ${images.length}…`);
-      const fd = new FormData();
-      fd.append('image', images[i].file);
-      const res = await fetch('/api/ocr', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `OCR failed for image ${i + 1}`);
-      if (typeof data.confidence === 'number') confidences.push(data.confidence);
-      if (els.rawText.value) els.rawText.value += '\n\n';
-      els.rawText.value += data.rawText;
-    }
+    setStatus(`⏳ Running OCR on ${images.length} image${images.length > 1 ? 's' : ''}…`);
+    // The server keeps a pool of workers, so send the batch in parallel rather
+    // than waiting for each page in turn.
+    const pages = await Promise.all(
+      images.map(async (img, i) => {
+        const file = await downscale(img.file);
+        const fd = new FormData();
+        fd.append('image', file);
+        const res = await fetch('/api/ocr', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `OCR failed for image ${i + 1}`);
+        return data;
+      })
+    );
+
+    const confidences = [];
+    pages.forEach((page, i) => {
+      if (typeof page.confidence === 'number') confidences.push(page.confidence);
+      // Namespace block ids per page so lines from different photos never merge.
+      for (const line of page.lines || []) {
+        layoutLines.push({ ...line, block: `${i}:${line.block}` });
+      }
+    });
+    els.rawText.value = pages.map((p) => p.rawText).join('\n\n');
+
     const avg = confidences.length
       ? Math.round((confidences.reduce((a, b) => a + b, 0) / confidences.length) * 100)
       : null;
@@ -145,10 +183,13 @@ els.formatBtn.addEventListener('click', async () => {
   if (!rawText) return;
   els.formatBtn.disabled = true;
   try {
+    // Editing the text invalidates the line boxes, so only send geometry while
+    // the recognized text is untouched.
+    const useLayout = !textEdited && layoutLines.length > 0;
     const res = await fetch('/api/format', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawText }),
+      body: JSON.stringify(useLayout ? { lines: layoutLines } : { rawText }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Formatting failed');
@@ -178,7 +219,8 @@ function renderBlocks(blocks) {
       node = document.createElement('p');
       node.append(...renderRuns(b.runs));
     }
-    els.blocksPreview.appendChild(node);
+    // renderListItem returns null when it appended to an existing list.
+    if (node) els.blocksPreview.appendChild(node);
   }
 }
 
@@ -241,6 +283,8 @@ els.startOverBtn.addEventListener('click', () => {
   images.forEach((i) => URL.revokeObjectURL(i.url));
   images = [];
   currentBlocks = [];
+  layoutLines = [];
+  textEdited = false;
   renderThumbs();
   updateCount();
   els.ocrStatus.classList.add('hidden');
